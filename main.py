@@ -1,71 +1,83 @@
-import cv2
-import json
-import numpy as np
+import tkinter as tk
+from tkinter import filedialog, ttk, messagebox
 
-# НАСТРОЙКИ
+from processor import load_and_scale_image
+from styles import style_pixel, style_oil_pixel
+from js_generator import generate_js
 
-CANVAS_W = 800
-CANVAS_H = 267
 
-PIXEL_STEP = 1   # шаг по пикселям
-DOT_SIZE = 1    # размер точки на canvas
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Pixel Canvas Generator")
+        self.root.geometry("300x420")
 
-# ПРЕОБРАЗОВАНИЕ КАРТИНКИ В ПИКСЕЛИ
+        self.image_path = None
 
-def image_to_pixels(path):
-    img = cv2.imread(path)
-    h, w = img.shape[:2]
+        ttk.Button(root, text="Выбрать изображение", command=self.choose_image).pack(pady=5)
 
-    scale = min(CANVAS_W / w, CANVAS_H / h)
-    new_w, new_h = int(w * scale), int(h * scale)
-    offset_x = (CANVAS_W - new_w) // 2
-    offset_y = (CANVAS_H - new_h) // 2
+        ttk.Label(root, text="Стиль").pack()
+        self.style = ttk.Combobox(root, values=["Pixel", "Oil Pixel"], state="readonly")
+        self.style.current(0)
+        self.style.pack()
 
-    resized = cv2.resize(img, (new_w, new_h))
+        ttk.Label(root, text="Детализация").pack()
+        self.detail = ttk.Scale(root, from_=1, to=10, orient="horizontal")
+        self.detail.set(2)
+        self.detail.pack()
 
-    pixels = []
+        ttk.Label(root, text="Размер мазка").pack()
+        self.size = ttk.Scale(root, from_=1, to=6, orient="horizontal")
+        self.size.set(2)
+        self.size.pack()
 
-    for y in range(0, new_h, PIXEL_STEP):
-        for x in range(0, new_w, PIXEL_STEP):
-            b, g, r = resized[y, x][:3]  # cv2 хранит в BGR
-            color = f'rgb({int(r)}, {int(g)}, {int(b)})'
+        ttk.Label(root, text="Шум позиции").pack()
+        self.pos_noise = ttk.Scale(root, from_=0, to=5, orient="horizontal")
+        self.pos_noise.set(1)
+        self.pos_noise.pack()
 
-            px = x + offset_x
-            py = y + offset_y
-            pixels.append({
-                "x": int(px),
-                "y": int(py),
-                "color": color
-            })
+        ttk.Label(root, text="Шум цвета").pack()
+        self.color_noise = ttk.Scale(root, from_=0, to=30, orient="horizontal")
+        self.color_noise.set(5)
+        self.color_noise.pack()
 
-    print(f"Pixels to draw: {len(pixels)}")
-    return pixels
+        ttk.Button(root, text="Сгенерировать JS", command=self.generate).pack(pady=10)
 
-# ГЕНЕРАЦИЯ JS
-def generate_js(pixels):
-    out = [
-        "(async function(){",
-        "  try {",
-        "    const canvas = document.querySelector('.drawing-canvas');",
-        "    if (!canvas) { console.error('Canvas not found'); return; }",
-        "    const ctx = canvas.getContext('2d');"
-    ]
+    def choose_image(self):
+        self.image_path = filedialog.askopenfilename(
+            filetypes=[("Images", "*.png *.jpg *.jpeg")]
+        )
 
-    for px in pixels:
-        out.append(f'    ctx.fillStyle = "{px["color"]}";')
-        out.append(f'    ctx.fillRect({px["x"]}, {px["y"]}, {DOT_SIZE}, {DOT_SIZE});')
+    def generate(self):
+        if not self.image_path:
+            messagebox.showerror("Ошибка", "Выберите изображение")
+            return
 
-    out.append("  } catch(e) { console.error('SCRIPT ERROR:', e); }")
-    out.append("})();")
+        img, ox, oy = load_and_scale_image(self.image_path)
 
-    return "\n".join(out)
+        step = int(self.detail.get())
+        size = int(self.size.get())
 
-# ЗАПУСК
+        if self.style.get() == "Pixel":
+            pixels = style_pixel(img, ox, oy, step, size)
+        else:
+            pixels = style_oil_pixel(
+                img, ox, oy,
+                step,
+                size,
+                int(self.pos_noise.get()),
+                int(self.color_noise.get())
+            )
+
+        js = generate_js(pixels)
+
+        with open("output.js", "w", encoding="utf-8") as f:
+            f.write(js)
+
+        messagebox.showinfo("Готово", "output.js создан")
+
+
 if __name__ == "__main__":
-    pixels = image_to_pixels("input.png")
-    js = generate_js(pixels)
-
-    with open("output.js", "w", encoding="utf-8") as f:
-        f.write(js)
-
-    print("✔ JS saved to output.js")
+    root = tk.Tk()
+    App(root)
+    root.mainloop()
